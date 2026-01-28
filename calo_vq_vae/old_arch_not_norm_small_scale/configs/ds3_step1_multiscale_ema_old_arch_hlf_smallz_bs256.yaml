@@ -1,0 +1,163 @@
+data:
+  params:
+    num_workers: 4
+    pin_memory: true
+    train:
+      target: calo_ldm.data.CaloHDF5
+      params:
+        load_partial: 100000
+        file_path: /net/pr2/projects/plgrid/plggdyplompw/plgfw01169396/calo3/dataset_3_12.hdf5
+        do_rotations: true
+        do_inversions: true
+    validation:
+      target: calo_ldm.data.CaloHDF5
+      params:
+        load_partial: 10000
+        file_path: /net/pr2/projects/plgrid/plggdyplompw/plgfw01169396/calo3/dataset_3_34.hdf5
+    batch_size: 256
+  target: calo_ldm.data.DataModuleFromConfig
+model:
+  base_learning_rate: 1.0e-04
+  monitor: val/rec_loss
+  target: calo_ldm.models.VQModel
+  params:
+    # Use global R normalization (not layer-wise)
+    # This is the original calo-vq approach
+    dataset_name: '3'
+    do_metric: true
+    do_more_metric: true
+    do_R_metric: null
+    metric_evts: 10000
+    record_freq: 20
+    legacy: true
+    embed_dim: 256
+    n_embed: 1024
+    cond_dim: 1
+    z_pad: null
+    z_padding_strategy: null
+    log_scale_params:
+    - 0
+    - 40000
+    - 10
+    reco_normalization: R
+    disc_normalization: U
+    # Multi-scale quantization parameters (for VAR compatibility)
+    use_multiscale_quant: true
+    v_patch_nums: [1, 2, 3, 4, 5, 6, 7, 9, 11, 14]
+    quant_resi: 0.0
+    share_quant_resi: 1
+    default_qresi_counts: 0
+    # VQ-VAE EMA and entropy loss parameters
+    vq_use_ema: true
+    vq_ema_decay: 0.99
+    vq_use_entropy_loss: false
+    vq_entropy_loss_weight: 0.1
+    vq_entropy_temperature: 1.0
+    vq_use_codebook_restart: false
+    vq_restart_threshold: 1.0
+    codebook_restart_freq: 1000
+    # === Original encoder architecture (no resnet/attention) ===
+    encoder_config:
+      target: calo_ldm.models.Encoder
+      params:
+        ch_in: 18
+        ch_out: 256
+        conv_spec:
+        - 'zpad  : 1 : 2'
+        - 'cconv : k33 :     : c32'
+        - 'cconv : k33 :     : c32'
+        - 'fftd  : 16 : 2'
+        - 'cconv : k33 : s21  : c64'
+        - 'cconv : k33 :      : c64'
+        - 'fftd  : 12 : 2'
+        - 'cconv : k33 :     : c128'
+        - 'cconv : k33 :     : c128'
+        - 'fftd  : 8 : 2'
+        - 'cconv : k33 :     : c256'
+        cond_dim: 1
+        log_scale_params:
+        - 0
+        - 40000
+        - 10
+        z_pad: null
+        z_padding_strategy: null
+    # === Original decoder architecture (no layer_seg = global R only) ===
+    decoder_config:
+      target: calo_ldm.models.Decoder
+      params:
+        ch_in: 256
+        ch_out: 18
+        conv_spec:
+        - 'cconvT : k33 :     : c128'
+        - 'ffti  : 8 : 2'
+        - 'cconvT : k33 :     : c128'
+        - 'cconvT : k33 :     : c64'
+        - 'ffti  : 12 : 2'
+        - 'cconvT : k33 :     : c64'
+        - 'cconvT : k33 : s21 : c32'
+        - 'ffti  : 16 : 2'
+        - 'cconvT : k33 :     : c32'
+        - 'cconvT : k33 :     : c32'
+        - 'zcrop : 1 : 1'
+        output_activation: voxel_relu_expm1_max
+        R_activation: softplus
+        cond_dim: 1
+        learn_R: false
+        z_pad: null
+        z_padding_strategy: null
+        # NO layer_seg = global R normalization only
+    loss_config:
+      target: calo_ldm.losses.CombinedLoss
+      params:
+        pixel_power: 2
+        pixel_weight: 1
+        # ===== Calo-eval aligned high-level feature (HLF) losses =====
+        use_calo_eval_physics: true
+        ec_weight: 0.0001
+        width_weight: 0.0001
+        ec_r_weight: 0.0001
+        width_r_weight: 0.0001
+        e_layer_weight: 0.0001
+        sparsity_weight: 0.0001
+        overflow_penalty_weight: 0.001
+        disc_conditional: false
+        disc_in_channels: 9
+        disc_start: 500
+        disc_weight: 0.8
+        codebook_weight: 1.0
+        perceptual_weight: 0
+        R1_weight: 5
+        R2_weight: 0
+        disc_config:
+          target: calo_ldm.models.Discriminator
+          params:
+            use_spectral_norm: false
+            pooling: null
+            cond_dim: 1
+            ch_in: 18
+            conv_spec:
+            - 'cconv : k33 :     : c32'
+            - 'cconv : k33 : s21 : c64'
+            - 'fftd : 18'
+            - 'cconv : k33 :     : c64'
+            - 'cconv : k33 : s21 : c128'
+            - 'fftd : 16'
+            - 'cconv : k33 :     : c128'
+            - 'fftd : 8'
+            - 'cconv : k33 :     : c256'
+            log_scale_params:
+            - 0
+            - 40000
+            - 10
+        perceptual_config: null
+        cond_dim: 1
+        n_embed: 1024
+        log_scale_params:
+        - 0
+        - 40000
+        - 10
+        disc_normalization: U
+        reco_normalization: R
+        unpad_z: null
+        dataset_name: '3'
+        learn_R: false
